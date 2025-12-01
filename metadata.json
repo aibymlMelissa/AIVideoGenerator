@@ -1,0 +1,5 @@
+{
+  "name": "AI Video Generator",
+  "description": "An application that uses Gemini's Veo model to generate a dynamic video background from a single uploaded image and a text prompt.",
+  "requestFramePermissions": []
+}
