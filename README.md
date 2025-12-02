@@ -1,4 +1,4 @@
-# AI Memory Animator
+# AI Video Generator - Memory Animator
 
 Transform your cherished photos into beautiful, animated videos using Google's Gemini Veo AI model.
 
