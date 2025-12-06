@@ -31,6 +31,7 @@ export async function generateVideo(
   let operation;
   if (images.length > 1) {
     // Use reference images for multiple images (max 3)
+    // Note: referenceImages is only supported by veo-3.1-generate-preview, not the fast variant
     const referenceImages = images.map(img => ({
       image: {
         imageBytes: img.data,
@@ -40,7 +41,7 @@ export async function generateVideo(
     }));
 
     operation = await ai.models.generateVideos({
-      model: 'veo-3.1-fast-generate-preview',
+      model: 'veo-3.1-generate-preview',  // Use standard model for reference images
       prompt: prompt,
       config: {
         ...config,
@@ -48,7 +49,7 @@ export async function generateVideo(
       }
     });
   } else {
-    // Single image - use the traditional image field
+    // Single image - use the traditional image field with fast model
     operation = await ai.models.generateVideos({
       model: 'veo-3.1-fast-generate-preview',
       prompt: prompt,
