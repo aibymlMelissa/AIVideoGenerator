@@ -4,7 +4,7 @@ import { suggestPrompts } from '../services/geminiService';
 import type { AspectRatio } from '../types';
 
 interface VideoGeneratorFormProps {
-  onGenerate: (image: { data: string; mimeType: string }, prompt: string, aspectRatio: AspectRatio) => void;
+  onGenerate: (images: { data: string; mimeType: string }[], prompt: string, aspectRatio: AspectRatio) => void;
   isGenerating: boolean;
 }
 
@@ -15,8 +15,8 @@ const UploadIcon: React.FC = () => (
 );
 
 export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenerate, isGenerating }) => {
-  const [imageFile, setImageFile] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [imageFiles, setImageFiles] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [prompt, setPrompt] = useState<string>('Bring this memory to life with gentle, nostalgic motion.');
   const [aspectRatio, setAspectRatio] = useState<AspectRatio>('16:9');
   const [error, setError] = useState<string | null>(null);
@@ -24,28 +24,59 @@ export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenera
   const [isSuggesting, setIsSuggesting] = useState<boolean>(false);
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      if (file.size > 10 * 1024 * 1024) { // 10MB limit
-        setError('File size must be less than 10MB.');
+    const files = event.target.files;
+    if (files && files.length > 0) {
+      const fileArray = Array.from(files);
+
+      // Validate: max 3 images
+      if (imageFiles.length + fileArray.length > 3) {
+        setError('You can upload a maximum of 3 images.');
         return;
       }
+
+      // Validate: each file must be under 10MB
+      const oversizedFile = fileArray.find(file => file.size > 10 * 1024 * 1024);
+      if (oversizedFile) {
+        setError(`File "${oversizedFile.name}" exceeds 10MB limit.`);
+        return;
+      }
+
       setError(null);
-      setImageFile(file);
-      setImagePreview(URL.createObjectURL(file));
-      setSuggestions([]); // Reset suggestions on new file
+
+      // Add new files to existing ones
+      const newFiles = [...imageFiles, ...fileArray];
+      setImageFiles(newFiles);
+
+      // Create previews for new files
+      const newPreviews = fileArray.map(file => URL.createObjectURL(file));
+      setImagePreviews([...imagePreviews, ...newPreviews]);
+
+      setSuggestions([]); // Reset suggestions on new files
     }
+  };
+
+  const handleRemoveImage = (index: number) => {
+    const newFiles = imageFiles.filter((_, i) => i !== index);
+    const newPreviews = imagePreviews.filter((_, i) => i !== index);
+
+    // Revoke the object URL to free memory
+    URL.revokeObjectURL(imagePreviews[index]);
+
+    setImageFiles(newFiles);
+    setImagePreviews(newPreviews);
+    setSuggestions([]); // Reset suggestions when images change
   };
   
   const handleSuggestPrompts = useCallback(async () => {
-    if (!imageFile) return;
+    if (imageFiles.length === 0) return;
 
     setIsSuggesting(true);
     setError(null);
     setSuggestions([]);
 
     try {
-        const imagePart = await fileToGenerativePart(imageFile);
+        // Use the first image for suggestions
+        const imagePart = await fileToGenerativePart(imageFiles[0]);
         const newSuggestions = await suggestPrompts(imagePart);
         setSuggestions(newSuggestions);
     } catch (e) {
@@ -53,45 +84,89 @@ export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenera
     } finally {
         setIsSuggesting(false);
     }
-  }, [imageFile]);
+  }, [imageFiles]);
 
   const handleSubmit = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!imageFile || !prompt) {
-      setError('Please provide an image and a prompt.');
+    if (imageFiles.length === 0 || !prompt) {
+      setError('Please provide at least one image and a prompt.');
       return;
     }
     setError(null);
     try {
-      const imagePart = await fileToGenerativePart(imageFile);
-      onGenerate(imagePart, prompt, aspectRatio);
+      // Convert all images to the format needed by the API
+      const imageParts = await Promise.all(
+        imageFiles.map(file => fileToGenerativePart(file))
+      );
+      onGenerate(imageParts, prompt, aspectRatio);
     } catch (e) {
-      setError(`Failed to process image: ${(e as Error).message}`);
+      setError(`Failed to process images: ${(e as Error).message}`);
     }
-  }, [imageFile, prompt, aspectRatio, onGenerate]);
+  }, [imageFiles, prompt, aspectRatio, onGenerate]);
   
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div>
-        <label htmlFor="file-upload" className="block text-sm font-medium text-slate-300 mb-2">Upload Photo</label>
-        <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-600 border-dashed rounded-md">
-          <div className="space-y-1 text-center">
-            {imagePreview ? (
-              <img src={imagePreview} alt="Preview" className="mx-auto h-24 w-auto rounded-md" />
-            ) : (
-              <UploadIcon />
-            )}
-            <div className="flex text-sm text-slate-400">
-              <label htmlFor="file-upload" className="relative cursor-pointer bg-slate-800 rounded-md font-medium text-cyan-400 hover:text-cyan-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-slate-900 focus-within:ring-cyan-500">
-                <span>{imageFile ? 'Change photo' : 'Upload a photo'}</span>
-                <input id="file-upload" name="file-upload" type="file" className="sr-only" accept="image/png, image/jpeg, image/webp" onChange={handleFileChange} />
-              </label>
-              <p className="pl-1">{imageFile ? imageFile.name : 'or drag and drop'}</p>
-            </div>
-            <p className="text-xs text-slate-500">PNG, JPG, WEBP up to 10MB</p>
+        <label htmlFor="file-upload" className="block text-sm font-medium text-slate-300 mb-2">
+          Upload Photos {imageFiles.length > 0 && `(${imageFiles.length}/3)`}
+        </label>
+
+        {/* Image Previews */}
+        {imagePreviews.length > 0 && (
+          <div className="mb-4 grid grid-cols-3 gap-4">
+            {imagePreviews.map((preview, index) => (
+              <div key={index} className="relative group">
+                <img
+                  src={preview}
+                  alt={`Preview ${index + 1}`}
+                  className="w-full h-32 object-cover rounded-md border-2 border-slate-600"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleRemoveImage(index)}
+                  className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                  title="Remove image"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                  </svg>
+                </button>
+                <div className="absolute bottom-1 left-1 bg-slate-900/80 px-2 py-1 rounded text-xs text-slate-300">
+                  {imageFiles[index].name.length > 15
+                    ? imageFiles[index].name.substring(0, 12) + '...'
+                    : imageFiles[index].name}
+                </div>
+              </div>
+            ))}
           </div>
-        </div>
-        {imageFile && (
+        )}
+
+        {/* Upload Area - only show if less than 3 images */}
+        {imageFiles.length < 3 && (
+          <div className="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-slate-600 border-dashed rounded-md">
+            <div className="space-y-1 text-center">
+              <UploadIcon />
+              <div className="flex text-sm text-slate-400">
+                <label htmlFor="file-upload" className="relative cursor-pointer bg-slate-800 rounded-md font-medium text-cyan-400 hover:text-cyan-300 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-offset-slate-900 focus-within:ring-cyan-500">
+                  <span>{imageFiles.length > 0 ? 'Add more photos' : 'Upload photos'}</span>
+                  <input
+                    id="file-upload"
+                    name="file-upload"
+                    type="file"
+                    multiple
+                    className="sr-only"
+                    accept="image/png, image/jpeg, image/webp"
+                    onChange={handleFileChange}
+                  />
+                </label>
+                <p className="pl-1">or drag and drop</p>
+              </div>
+              <p className="text-xs text-slate-500">PNG, JPG, WEBP up to 10MB each (max 3 images)</p>
+            </div>
+          </div>
+        )}
+
+        {imageFiles.length > 0 && (
             <div className="mt-4 text-center">
                 <button
                     type="button"
@@ -166,7 +241,7 @@ export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenera
       
       <button
         type="submit"
-        disabled={isGenerating || !imageFile || isSuggesting}
+        disabled={isGenerating || imageFiles.length === 0 || isSuggesting}
         className="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-cyan-600 hover:bg-cyan-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-slate-800 focus:ring-cyan-500 disabled:bg-slate-500 disabled:cursor-not-allowed transition-colors"
       >
         {isGenerating ? 'Generating Your Video...' : 'Animate Memory or Generate Your Video'}

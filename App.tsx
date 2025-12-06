@@ -84,10 +84,10 @@ const App: React.FC = () => {
     setShareError(null); // Reset share error
   };
 
-  const handleGeneration = async (image: { data: string; mimeType: string }, prompt: string, aspectRatio: AspectRatio) => {
+  const handleGeneration = async (images: { data: string; mimeType: string }[], prompt: string, aspectRatio: AspectRatio) => {
     handleGenerationStart();
     try {
-        const url = await generateVideo(image, prompt, aspectRatio, setLoadingMessage);
+        const url = await generateVideo(images, prompt, aspectRatio, setLoadingMessage);
         setVideoUrl(url);
     } catch (e) {
         const err = e as Error;

@@ -11,27 +11,54 @@ const LOADING_MESSAGES = [
 ];
 
 export async function generateVideo(
-  image: { data: string; mimeType: string },
+  images: { data: string; mimeType: string }[],
   prompt: string,
   aspectRatio: AspectRatio,
   setLoadingMessage: (message: string) => void
 ): Promise<string> {
   // IMPORTANT: Instantiate GoogleGenAI right before the call to use the latest API key.
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  
-  let operation = await ai.models.generateVideos({
-    model: 'veo-3.1-fast-generate-preview',
-    prompt: prompt,
-    image: {
-      imageBytes: image.data,
-      mimeType: image.mimeType,
-    },
-    config: {
-      numberOfVideos: 1,
-      resolution: '720p',
-      aspectRatio: aspectRatio,
-    }
-  });
+
+  // Prepare the request config
+  const config: any = {
+    numberOfVideos: 1,
+    resolution: '720p',
+    aspectRatio: aspectRatio,
+  };
+
+  // If we have multiple images, use referenceImages with ASSET type
+  // Otherwise, use the single image field for backward compatibility
+  let operation;
+  if (images.length > 1) {
+    // Use reference images for multiple images (max 3)
+    const referenceImages = images.map(img => ({
+      image: {
+        imageBytes: img.data,
+        mimeType: img.mimeType,
+      },
+      referenceType: 'ASSET' as const,
+    }));
+
+    operation = await ai.models.generateVideos({
+      model: 'veo-3.1-fast-generate-preview',
+      prompt: prompt,
+      config: {
+        ...config,
+        referenceImages: referenceImages,
+      }
+    });
+  } else {
+    // Single image - use the traditional image field
+    operation = await ai.models.generateVideos({
+      model: 'veo-3.1-fast-generate-preview',
+      prompt: prompt,
+      image: {
+        imageBytes: images[0].data,
+        mimeType: images[0].mimeType,
+      },
+      config: config
+    });
+  }
 
   let messageIndex = 0;
   setLoadingMessage(LOADING_MESSAGES[messageIndex]);
