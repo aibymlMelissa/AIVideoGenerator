@@ -6,6 +6,7 @@ import type { AspectRatio } from '../types';
 interface VideoGeneratorFormProps {
   onGenerate: (images: { data: string; mimeType: string }[], prompt: string, aspectRatio: AspectRatio) => void;
   isGenerating: boolean;
+  apiKey: string;
 }
 
 const UploadIcon: React.FC = () => (
@@ -14,7 +15,7 @@ const UploadIcon: React.FC = () => (
   </svg>
 );
 
-export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenerate, isGenerating }) => {
+export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenerate, isGenerating, apiKey }) => {
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const [prompt, setPrompt] = useState<string>('Bring this memory to life with gentle, nostalgic motion.');
@@ -77,14 +78,14 @@ export const VideoGeneratorForm: React.FC<VideoGeneratorFormProps> = ({ onGenera
     try {
         // Use the first image for suggestions
         const imagePart = await fileToGenerativePart(imageFiles[0]);
-        const newSuggestions = await suggestPrompts(imagePart);
+        const newSuggestions = await suggestPrompts(imagePart, apiKey);
         setSuggestions(newSuggestions);
     } catch (e) {
         setError(`Failed to get suggestions: ${(e as Error).message}`);
     } finally {
         setIsSuggesting(false);
     }
-  }, [imageFiles]);
+  }, [imageFiles, apiKey]);
 
   const handleSubmit = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();

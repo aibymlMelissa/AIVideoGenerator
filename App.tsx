@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { GoogleGenAI } from '@google/genai';
+import React, { useState, useEffect } from 'react';
 import { ApiKeySelector } from './components/ApiKeySelector';
 import { VideoGeneratorForm } from './components/VideoGeneratorForm';
 import { LoadingIndicator } from './components/LoadingIndicator';
@@ -7,16 +6,8 @@ import { generateVideo } from './services/geminiService';
 import { shareVideoToDrive } from './services/googleDriveService';
 import type { AspectRatio } from './types';
 
-// Extend the Window interface to include the aistudio object and Google Identity Services
 declare global {
-  // FIX: The original anonymous type for `aistudio` conflicted with another declaration.
-  // Defining a named `AIStudio` interface resolves this type conflict.
-  interface AIStudio {
-    hasSelectedApiKey: () => Promise<boolean>;
-    openSelectKey: () => Promise<void>;
-  }
   interface Window {
-    aistudio?: AIStudio;
     google?: {
       accounts: {
         oauth2: {
@@ -34,8 +25,7 @@ declare global {
 }
 
 const App: React.FC = () => {
-  const [apiKeySelected, setApiKeySelected] = useState<boolean>(false);
-  const [isCheckingApiKey, setIsCheckingApiKey] = useState<boolean>(true);
+  const [apiKey, setApiKey] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [loadingMessage, setLoadingMessage] = useState<string>('');
@@ -44,24 +34,6 @@ const App: React.FC = () => {
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareError, setShareError] = useState<string | null>(null);
 
-  const checkApiKey = useCallback(async () => {
-    setIsCheckingApiKey(true);
-    if (window.aistudio) {
-      const hasKey = await window.aistudio.hasSelectedApiKey();
-      setApiKeySelected(hasKey);
-    } else {
-      // If aistudio is not available, assume we are in a different environment
-      // and a key might be set via process.env. For this app, we'll hide the selector.
-      setApiKeySelected(true); 
-    }
-    setIsCheckingApiKey(false);
-  }, []);
-
-  useEffect(() => {
-    checkApiKey();
-  }, [checkApiKey]);
-
-  // Clean up the object URL when the component unmounts or the URL changes to prevent memory leaks
   useEffect(() => {
     return () => {
       if (videoUrl) {
@@ -70,36 +42,32 @@ const App: React.FC = () => {
     };
   }, [videoUrl]);
 
-
-  const handleApiKeySelected = () => {
-    setApiKeySelected(true);
-  };
-  
-  const handleGenerationStart = () => {
-    setIsGenerating(true);
-    // Setting videoUrl to null will trigger the useEffect cleanup for the old URL
-    setVideoUrl(null);
+  const handleApiKeyReady = (key: string) => {
+    setApiKey(key);
     setError(null);
-    setShareUrl(null); // Reset share URL on new generation
-    setShareError(null); // Reset share error
   };
 
   const handleGeneration = async (images: { data: string; mimeType: string }[], prompt: string, aspectRatio: AspectRatio) => {
-    handleGenerationStart();
+    if (!apiKey) return;
+    setIsGenerating(true);
+    setVideoUrl(null);
+    setError(null);
+    setShareUrl(null);
+    setShareError(null);
     try {
-        const url = await generateVideo(images, prompt, aspectRatio, setLoadingMessage);
-        setVideoUrl(url);
+      const url = await generateVideo(images, prompt, aspectRatio, setLoadingMessage, apiKey);
+      setVideoUrl(url);
     } catch (e) {
-        const err = e as Error;
-        console.error(err);
-        if (err.message.includes("Requested entity was not found")) {
-            setError("API Key validation failed. Please select a valid API key.");
-            setApiKeySelected(false); // Force re-selection
-        } else {
-            setError(`An error occurred during video generation: ${err.message}`);
-        }
+      const err = e as Error;
+      console.error(err);
+      if (err.message.includes("Requested entity was not found")) {
+        setError("API Key validation failed. Please check your key or password.");
+        setApiKey(null);
+      } else {
+        setError(`An error occurred during video generation: ${err.message}`);
+      }
     } finally {
-        setIsGenerating(false);
+      setIsGenerating(false);
     }
   };
 
@@ -129,13 +97,10 @@ const App: React.FC = () => {
   };
 
   const renderContent = () => {
-    if (isCheckingApiKey) {
-      return <div className="text-white">Checking API Key status...</div>;
+    if (!apiKey) {
+      return <ApiKeySelector onApiKeyReady={handleApiKeyReady} error={error} />;
     }
-    if (!apiKeySelected) {
-      return <ApiKeySelector onApiKeySelected={handleApiKeySelected} error={error} />;
-    }
-    return <VideoGeneratorForm onGenerate={handleGeneration} isGenerating={isGenerating} />;
+    return <VideoGeneratorForm onGenerate={handleGeneration} isGenerating={isGenerating} apiKey={apiKey} />;
   };
 
   return (
@@ -152,7 +117,7 @@ const App: React.FC = () => {
         />
       )}
       <div className="absolute top-0 left-0 w-full h-full bg-black bg-opacity-60 z-10"></div>
-      
+
       <main className="relative z-20 flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 lg:p-8">
         <div className="w-full max-w-4xl text-center mb-8">
           <h1 className="text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-white">
@@ -197,7 +162,7 @@ const App: React.FC = () => {
                 <span>{isSharing ? 'Sharing...' : 'Share to Drive'}</span>
               </button>
             </div>
-            
+
             {shareUrl && (
               <div className="mt-4 p-3 w-full max-w-md bg-green-900/50 rounded-lg text-center">
                 <p className="text-green-300">Share successful! Link:</p>
@@ -206,7 +171,7 @@ const App: React.FC = () => {
                 </a>
               </div>
             )}
-            
+
             {shareError && (
               <div className="mt-4 p-3 w-full max-w-md bg-red-900/50 rounded-lg text-center text-red-400">
                 <p>{shareError}</p>
@@ -216,7 +181,7 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {error && !isGenerating && !apiKeySelected && (
+        {error && !isGenerating && !apiKey && (
            <div className="mt-4 text-center text-red-400 font-semibold p-3 bg-red-900/50 rounded-lg">
              {error}
            </div>

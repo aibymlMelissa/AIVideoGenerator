@@ -14,10 +14,10 @@ export async function generateVideo(
   images: { data: string; mimeType: string }[],
   prompt: string,
   aspectRatio: AspectRatio,
-  setLoadingMessage: (message: string) => void
+  setLoadingMessage: (message: string) => void,
+  apiKey: string
 ): Promise<string> {
-  // IMPORTANT: Instantiate GoogleGenAI right before the call to use the latest API key.
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   // Prepare the request config
   const config: any = {
@@ -72,7 +72,7 @@ export async function generateVideo(
     setLoadingMessage(LOADING_MESSAGES[messageIndex]);
 
     try {
-        const newAiInstance = new GoogleGenAI({ apiKey: process.env.API_KEY });
+        const newAiInstance = new GoogleGenAI({ apiKey });
         operation = await newAiInstance.operations.getVideosOperation({ operation: operation });
     } catch(e) {
         console.error("Polling failed:", e);
@@ -80,26 +80,49 @@ export async function generateVideo(
     }
   }
 
-  const downloadLink = operation.response?.generatedVideos?.[0]?.video?.uri;
+  const response = operation.response;
+  const generatedVideo = response?.generatedVideos?.[0];
+  const downloadLink = generatedVideo?.video?.uri;
 
   if (!downloadLink) {
-    throw new Error('Video generation completed, but no download link was found.');
+    // Log full response for debugging
+    console.error('Video generation response:', JSON.stringify(response, null, 2));
+
+    // Check for filtering / safety rejection
+    const filterReason = generatedVideo?.video?.filterReason;
+    if (filterReason) {
+      throw new Error(`Video was filtered by safety policy: ${filterReason}. Try a different prompt.`);
+    }
+
+    // Check if there's an error in the response
+    const errorMessage = (response as any)?.error?.message;
+    if (errorMessage) {
+      throw new Error(`Video generation failed: ${errorMessage}`);
+    }
+
+    // Check if generatedVideos array is empty or missing
+    if (!response?.generatedVideos || response.generatedVideos.length === 0) {
+      throw new Error('Video generation completed, but no video was returned. The content may have been filtered by safety policies. Try a different prompt or image.');
+    }
+
+    throw new Error('Video generation completed, but no download link was found. Check the browser console for details.');
   }
 
   setLoadingMessage("Fetching generated video...");
-  const response = await fetch(`${downloadLink}&key=${process.env.API_KEY}`);
-  if (!response.ok) {
-    throw new Error(`Failed to download video: ${response.statusText}`);
+  const downloadResponse = await fetch(`${downloadLink}&key=${apiKey}`);
+  if (!downloadResponse.ok) {
+    throw new Error(`Failed to download video: ${downloadResponse.statusText}`);
   }
-  
-  const videoBlob = await response.blob();
+
+  const videoBlob = await downloadResponse.blob();
   return URL.createObjectURL(videoBlob);
 }
 
 export async function suggestPrompts(
-  image: { data: string; mimeType: string }
+  image: { data: string; mimeType: string },
+  apiKey: string
 ): Promise<string[]> {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey });
 
   const imagePart = {
     inlineData: {
